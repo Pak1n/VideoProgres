@@ -1,0 +1,244 @@
+<!doctype html>
+<html lang="th">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>ความคืบหน้า</title>
+<style>
+  :root { --maxw: 920px; --radius: 12px; --gap: 12px; --muted:#6b7280; }
+  * { box-sizing: border-box; }
+  body { font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif; margin: 0; background: #f8fafc; color: #0f172a; }
+  header { background: #0f172a; color: #fff; padding: 16px; }
+  header .wrap, main, .container { max-width: var(--maxw); margin: 0 auto; }
+  header h1 { margin: 0; font-size: 18px; }
+  header small { color: #cbd5e1; }
+  .bar { display:flex; gap: 8px; align-items: center; margin-top: 8px; flex-wrap: wrap; }
+  .card { background:#fff; border-radius: var(--radius); padding: 14px; box-shadow: 0 2px 10px rgba(0,0,0,.04); }
+  .grid { display: grid; gap: var(--gap); }
+  .progress { background:#e5e7eb; border-radius: 999px; overflow: hidden; height: 10px; }
+  .progress > div { background:#22c55e; height: 100%; width: 0; transition: width .25s ease; }
+  .muted { color: var(--muted); font-size: 12px; }
+  .task-header { display:flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: wrap; }
+  .steps { display: flex; flex-wrap: wrap; gap: 8px; }
+  .step { display:flex; gap: 8px; align-items: flex-start; background:#f9fafb; padding: 8px; border-radius: 8px; flex: 1 1 220px; word-break: break-word; }
+  .row { display: flex; gap: 8px; flex-wrap: wrap; }
+  input[type="text"], input[type="email"], input[type="password"], textarea, select {
+    width: 100%; padding: 10px; border:1px solid #e5e7eb; border-radius: 10px; background:#fff;
+  }
+  button { padding: 10px 14px; border: 0; border-radius: 10px; background:#0ea5e9; color:#fff; cursor:pointer; }
+  button[disabled] { opacity:.5; cursor: not-allowed; }
+  .outline { background:#fff; color:#0ea5e9; border:1px solid #0ea5e9; }
+  .danger { background:#ef4444; }
+  .tag { font-size:12px; padding:4px 8px; border-radius:999px; background:#eef2ff; color:#3730a3; }
+  .comment { border-top:1px dashed #e5e7eb; padding-top:8px; margin-top:8px; }
+  .sticky { position: sticky; top: 0; z-index: 10; }
+  footer { text-align:center; color: var(--muted); padding: 24px; }
+
+  /* หน้า Splash */
+  #splash { position:fixed; inset:0; background:#0f172a; color:#fff; display:flex; flex-direction:column; justify-content:center; align-items:center; text-align:center; font-family:system-ui; z-index:1000; cursor:pointer; }
+  #splash h1 { font-size:64px; margin:0; }
+  #splash p { font-size:20px; margin-top:12px; }
+</style>
+</head>
+<body>
+<!-- หน้าแรก Splash -->
+<div id="splash">
+  <h1>PROJECT PROGRESS</h1>
+  <p>Tap To Continue</p>
+</div>
+
+<header class="sticky">
+  <div class="wrap">
+    <h1>ความคืบหน้างานตัดต่อ</h1>
+    <div class="bar">
+      <small class="muted">อัปเดตแบบเรียลไทม์ </small>
+    </div>
+    <div class="bar" id="authBar"></div>
+  </div>
+</header>
+
+<main class="grid" style="padding: 16px;">
+  <section id="adminPanel" class="card" style="display:none;">
+    <h3>แผงผู้ดูแล</h3>
+    <div class="row">
+      <input id="taskName" type="text" placeholder="ชื่องาน เช่น Video Promo #1" />
+      <button id="btnAddTask">+ เพิ่มงาน</button>
+    </div>
+    <small class="muted">เพิ่มงานใหม่ จากนั้นติ๊กขั้นตอนเพื่ออัปเดต % ความคืบหน้า</small>
+  </section>
+  <section id="tasks" class="grid"></section>
+</main>
+
+<footer>© สถานะโปรเจกต์</footer>
+
+<script type="module">
+const firebaseConfig = {
+  apiKey: "AIzaSyDD2IdEMyL432ppYtd4otGS6OqcnGwVTeg",
+  authDomain: "video-progress-by-pakin.firebaseapp.com",
+  projectId: "video-progress-by-pakin",
+  storageBucket: "video-progress-by-pakin.firebasestorage.app",
+  messagingSenderId: "451752819163",
+  appId: "1:451752819163:web:a2ac1df08515d2891f8ffe"
+};
+
+const ADMIN_UIDS = new Set(["0tsXQx1oMddNxQVbkWj0D1wQRo52"]);
+
+// ปรับขั้นตอนใหม่
+const EDIT_STEPS = [
+  "หาฟุตเทจ (Select Footage)",
+  "คัทเดดแอร์ (Rough Cut)",
+  "เรียบเรียงคลิป (Sequence)",
+  "ใส่ซับ (Subtitles)",
+  "ทรานซิชัน (Transitions)",
+  "ตรวจคลิป (Internal Review)",
+  "เรนเดอร์ & กำลังอัปขึ้นไดรฟ์ (Final Export & Upload)"
+];
+
+import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
+import { getAuth, onAuthStateChanged, signInWithEmailAndPassword, signOut } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
+import { getFirestore, collection, addDoc, doc, onSnapshot, query, orderBy, updateDoc, serverTimestamp, deleteDoc } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
+
+const app = initializeApp(firebaseConfig);
+const auth = getAuth(app);
+const db = getFirestore(app);
+
+const el = (sel, root=document) => root.querySelector(sel);
+const els = (sel, root=document) => [...root.querySelectorAll(sel)];
+const tasksRoot = el('#tasks');
+const adminPanel = el('#adminPanel');
+const authBar = el('#authBar');
+
+const urlParams = new URLSearchParams(window.location.search);
+const showAdminLogin = urlParams.get('admin') === '1';
+
+function isAdmin(user) { return !!user && ADMIN_UIDS.has(user.uid); }
+
+function pctFromSteps(stepsState) {
+  const total = EDIT_STEPS.length;
+  const done = EDIT_STEPS.filter((_, i) => stepsState[i]).length;
+  const raw = Math.round((done / total) * 100);
+  return Math.min(100, Math.max(0, Math.round(raw / 10) * 10));
+}
+
+function taskCard(id, data, userIsAdmin) {
+  const pct = data.progress ?? 0;
+  const wrapper = document.createElement('article');
+  wrapper.className = 'card';
+
+  wrapper.innerHTML = `
+    <div class="task-header">
+      <div>
+        <strong>${data.name}</strong>
+        <div class="muted">อัปเดตล่าสุด: ${data.updatedAt?.toDate ? data.updatedAt.toDate().toLocaleString() : '-'}</div>
+      </div>
+      <span class="tag">${pct}%</span>
+    </div>
+    <div class="progress" style="margin:10px 0 6px;">
+      <div style="width:${pct}%"></div>
+    </div>
+
+    <details ${userIsAdmin ? 'open' : ''}>
+      <summary style="cursor:pointer; margin-bottom:8px;">ขั้นตอนงานตัดต่อ</summary>
+      <div class="steps" data-steps></div>
+      ${userIsAdmin ? `<div class="row" style="margin-top:10px;">
+        <button class="outline" data-save>บันทึกสถานะ</button>
+        <button class="danger" data-delete>ลบงาน</button>
+      </div>` : `<small class="muted">* เฉพาะผู้ดูแลเท่านั้นที่แก้ไขขั้นตอนได้</small>`}
+    </details>
+
+    <div class="comment">
+      <strong>คอมเมนต์เพิ่มเติม</strong>
+      <div class="grid" data-comments style="gap:8px; margin-top:8px;"></div>
+      <div class="row" style="margin-top:8px;">
+        <input type="text" placeholder="ชื่อของคุณ (ไม่บังคับ)" data-c-name />
+        <textarea rows="2" placeholder="พิมพ์คอมเมนต์ เช่น อยากให้ตัดช่วงนี้สั้นลง" data-c-text></textarea>
+        <button data-c-send>ส่งคอมเมนต์</button>
+      </div>
+    </div>
+  `;
+
+  const stepsHost = el('[data-steps]', wrapper);
+  const states = data.steps ?? {};
+  EDIT_STEPS.forEach((label, i) => {
+    const row = document.createElement('label');
+    row.className = 'step';
+    row.innerHTML = `
+      <input type="checkbox" ${states[i] ? 'checked' : ''} ${userIsAdmin ? '' : 'disabled'} data-step="${i}" />
+      <div>${label}</div>
+    `;
+    stepsHost.appendChild(row);
+  });
+
+  if (userIsAdmin) {
+    el('[data-save]', wrapper).addEventListener('click', async () => {
+      const checkboxes = els('input[type="checkbox"][data-step]', wrapper);
+      const newStates = {};
+      checkboxes.forEach(cb => newStates[cb.dataset.step] = cb.checked);
+      const newPct = pctFromSteps(newStates);
+      await updateDoc(doc(db, 'tasks', id), {
+        steps: newStates,
+        progress: newPct,
+        updatedAt: serverTimestamp(),
+      });
+    });
+
+    el('[data-delete]', wrapper).addEventListener('click', async () => {
+      if (!confirm('ลบงานนี้ถาวร?')) return;
+      await deleteDoc(doc(db, 'tasks', id));
+    });
+  }
+
+  const cList = el('[data-comments]', wrapper);
+  const cName = el('[data-c-name]', wrapper);
+  const cText = el('[data-c-text]', wrapper);
+  const cSend = el('[data-c-send]', wrapper);
+
+  const commentsRef = collection(db, 'tasks', id, 'comments');
+  onSnapshot(query(commentsRef, orderBy('createdAt','desc')), (snap) => {
+    cList.innerHTML = '';
+    snap.forEach(d => {
+      const v = d.data();
+      const item = document.createElement('div');
+      item.className = 'card';
+      item.style.padding = '8px';
+      item.innerHTML = `
+        <div><strong>${v.author || 'ลูกค้า'}</strong> <span class="muted">• ${v.createdAt?.toDate ? v.createdAt.toDate().toLocaleString() : ''}</span></div>
+        <div style="margin-top:4px;">${(v.text || '').replace(/\n/g,'<br>')}</div>
+      `;
+      cList.appendChild(item);
+    });
+  });
+
+  cSend.addEventListener('click', async () => {
+    const author = (cName.value || '').trim();
+    const text = (cText.value || '').trim();
+    if (!text) { alert('กรุณาพิมพ์คอมเมนต์'); return; }
+    await addDoc(commentsRef, { author, text, createdAt: serverTimestamp() });
+    cText.value = '';
+  });
+
+  return wrapper;
+}
+
+function renderAuthBar(user) {
+  authBar.innerHTML = '';
+  if (!showAdminLogin) return;
+
+  const frag = document.createDocumentFragment();
+
+  if (isAdmin(user)) {
+    const span = document.createElement('span');
+    span.textContent = `เข้าใช้ในโหมดผู้ดูแล: ${user.email}`;
+    span.className = 'muted';
+    const btn = document.createElement('button');
+    btn.textContent = 'ออกจากระบบ';
+    btn.addEventListener('click', () => signOut(auth));
+    frag.append(span, btn);
+  } else {
+    const email = document.createElement('input');
+    email.type = 'email'; email.placeholder = 'อีเมลผู้ดูแล';
+    const pass = document.createElement('input');
+    pass.type = 'password'; pass.placeholder = 'รหัสผ่าน';
+    const btn = document.createElement('button');
+    btn.textContent = 'เข้าสู่ระบบผู้ดูแล';
+    btn.addEvent
